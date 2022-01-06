@@ -1,0 +1,14 @@
+---
+- ocp_cluster_name: poc
+- domain: tonyjames.lab
+- ocp_client_url: https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/4.8.23/openshift-client-linux.tar.gz
+- ocp_install_url: https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/4.8.23/openshift-install-linux.tar.gz
+- ocp_deploy_version: 4.8.23-x86_64
+- ocp_upgrade_version: 4.8.24-x86_64
+- registry_username: admin
+- registry_password: Redhat1!
+- registry_creds: "{{registry_username + ':' + registry_password}}"
+- registry_creds_encoded: "{{registry_creds |b64encode}}"
+- email_address: tony@redhat.com
+- user_id: cloud-user
+- user_home: /home/cloud-user

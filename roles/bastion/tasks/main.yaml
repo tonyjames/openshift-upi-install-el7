@@ -1,0 +1,215 @@
+---
+- name: Download and install openshift-client
+  unarchive:
+    src: "{{ocp_client_url}}"
+    dest: /usr/local/bin
+    remote_src: yes
+
+- name: Download and install openshift-install
+  unarchive:
+    src: "{{ocp_install_url}}"
+    dest: /usr/local/bin
+    remote_src: yes
+
+- name: Enable bash completion
+  copy:
+    src: files/openshift-completion.sh
+    dest: /etc/profile.d/openshift-completion.sh
+    owner: root
+    group: root
+    mode: 0644
+
+- name: Create directories for container registry
+  file:
+    path: "{{item}}"
+    state: directory
+    mode: 0755
+  loop:
+    - /data/registry
+    - /data/registry-certs
+    - /data/registry-auth
+
+- name: Generate CA private key
+  openssl_privatekey:
+    path: /data/registry-certs/ca.key
+    size: 2048
+      
+- name: Generate CA CSR
+  openssl_csr:
+    path: /data/registry-certs/ca.csr
+    privatekey_path: /data/registry-certs/ca.key
+    common_name: "POC CA"
+    organization_name: "Red Hat"
+    basic_constraints: "CA:TRUE"
+    use_common_name_for_san: false
+
+- name: Generate CA certificate
+  openssl_certificate:
+    path: /data/registry-certs/ca.crt
+    privatekey_path: /data/registry-certs/ca.key
+    csr_path: /data/registry-certs/ca.csr
+    provider: selfsigned
+
+- name: Copy CA certificate to /etc/pki/ca-trust/source/anchors/
+  copy:
+    src: /data/registry-certs/ca.crt
+    dest: /etc/pki/ca-trust/source/anchors/registry-ca.crt
+    owner: root
+    group: root
+    mode: 0644
+
+- name: Update OS trust store
+  command: update-ca-trust
+
+- name: Generate registry private key
+  openssl_privatekey:
+    path: /data/registry-certs/registry.key
+    size: 2048 
+
+- name: Generate registry CSR
+  openssl_csr:
+    path: /data/registry-certs/registry.csr
+    privatekey_path: /data/registry-certs/registry.key
+    common_name: "{{ansible_eth0.ipv4.address}}"
+    subject_alt_name: "IP:{{ansible_eth0.ipv4.address}}"
+
+- name: Generate registry certificate
+  openssl_certificate:
+    path: /data/registry-certs/registry.crt
+    privatekey_path: /data/registry-certs/registry.key
+    csr_path: /data/registry-certs/registry.csr
+    provider: ownca
+    ownca_path: /data/registry-certs/ca.crt
+    ownca_privatekey_path: /data/registry-certs/ca.key
+
+- name: Create htpasswd file for registry
+  shell: htpasswd -bBc /data/registry-auth/htpasswd {{registry_username}} {{registry_password}}
+
+- name: Start container registry
+  containers.podman.podman_container:
+    name: registry
+    image: docker.io/registry:2
+    state: started
+    ports:
+      - "5000:5000"
+    volume:
+      - /data/registry:/var/lib/registry:Z
+      - /data/registry-certs:/certs:Z
+      - /data/registry-auth:/auth:Z
+    env:
+      REGISTRY_HTTP_TLS_CERTIFICATE: /certs/registry.crt
+      REGISTRY_HTTP_TLS_KEY: /certs/registry.key
+      REGISTRY_AUTH: htpasswd
+      REGISTRY_AUTH_HTPASSWD_REALM: "Registry Realm"
+      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
+    restart_policy: always
+  register: registry_container
+
+- name: Write pull-secret-rh.json
+  copy:
+    src: files/pull-secret.json
+    dest: "{{user_home}}/pull-secret-rh.json"
+    owner: "{{user_id}}"
+    group: "{{user_id}}"
+    mode: 0644
+
+- name: Write pull-secret-local.json
+  template:
+    src: templates/pull-secret-local.json.j2
+    dest: "{{user_home}}/pull-secret-local.json"
+    owner: "{{user_id}}"
+    group: "{{user_id}}"
+    mode: 0644
+
+- name: Pause for user creation of pull-secret.json
+  pause:
+    prompt: Please create {{user_home}}/pull-secret.json by merging {{user_home}}/pull-secret-rh.json and {{user_home}}/pull-secret-local.json and then press return to continue
+
+- name: Mirror OpenShift {{ocp_deploy_version}}
+  shell: |
+    /usr/local/bin/oc adm release mirror \
+      --registry-config={{user_home}}/pull-secret.json \
+      --from=quay.io/openshift-release-dev/ocp-release:{{ocp_deploy_version}} \
+      --to={{ansible_eth0.ipv4.address}}:5000/openshift-release-dev \
+      --to-release-image={{ansible_eth0.ipv4.address}}:5000/openshift-release-dev/ocp-release:{{ocp_deploy_version}} \
+      --insecure=true
+  when: registry_container.changed
+
+- name: Mirror OpenShift {{ocp_upgrade_version}}
+  shell: |
+    /usr/local/bin/oc adm release mirror \
+      --registry-config={{user_home}}/pull-secret.json \
+      --from=quay.io/openshift-release-dev/ocp-release:{{ocp_upgrade_version}} \
+      --to={{ansible_eth0.ipv4.address}}:5000/openshift-release-dev \
+      --to-release-image={{ansible_eth0.ipv4.address}}:5000/openshift-release-dev/ocp-release:{{ocp_upgrade_version}} \
+      --insecure=true
+  when: registry_container.changed
+
+- name: Copy CA certificate to /tmp
+  copy:
+    src: /data/registry-certs/ca.crt
+    dest: /tmp/ca.crt
+    owner: "{{ansible_user_id}}"
+    group: "{{ansible_user_id}}"
+    mode: 0644
+
+- name: Format /tmp/ca.crt for install-config.yaml
+  replace:
+    path: /tmp/ca.crt
+    regexp: "^"
+    replace: "  "
+
+- name: Fetch CA certificate
+  slurp:
+    src: /tmp/ca.crt
+  register: ca_certificate
+
+- name: Write install-config.yaml
+  template:
+    src: templates/install-config.yaml.j2
+    dest: "{{user_home}}/install-config.yaml"
+    owner: "{{user_id}}"
+    group: "{{user_id}}"
+    mode: 0644
+
+- name: Write imagecontentsourcepolicy.yaml
+  template:
+    src: templates/imagecontentsourcepolicy.yaml.j2
+    dest: "{{user_home}}/imagecontentsourcepolicy.yaml"
+    owner: "{{user_id}}"
+    group: "{{user_id}}"
+    mode: 0644
+
+- name: Gather redhat-operator-index manifests
+  shell: |
+    cd {{user_home}} &&
+    /usr/local/bin/oc adm catalog mirror \
+      registry.redhat.io/redhat/redhat-operator-index:v4.8 \
+      {{ansible_eth0.ipv4.address}}:5000/redhat-operator-index:v4.8 \
+      -a {{user_home}}/pull-secret.json \
+      --insecure \
+      --index-filter-by-os='linux/amd64' \
+      --manifests-only && \
+    chown -R {{user_id}}:{{user_id}} {{user_home}} manifests-redhat-operator-index-*
+  when: registry_container.changed
+
+- name: Select specific operators to mirror
+  shell: |
+    cd {{user_home}}/manifests-redhat-operator-index-* && \
+    grep "registry.redhat.io\/redhat\/redhat-operator-index" mapping.txt > mapping-custom.txt && \
+    egrep "advanced-cluster-security|rh-acs" mapping.txt |sort |uniq >> mapping-custom.txt && \
+    egrep "rh-sso-7|postgresql-13" mapping.txt |sort |uniq >> mapping-custom.txt && \
+    egrep "codeready-workspaces" mapping.txt |sort |uniq >> mapping-custom.txt && \
+    egrep "ubi8" mapping.txt |sort |uniq >> mapping-custom.txt && \
+    egrep "ose-kube-rbac-proxy" mapping.txt |grep -v fc83eea0da980ee035a8e77c4750faa1c174a3d521f3d8418364fcdb275e2f70 |sort |uniq >> mapping-custom.txt && \
+    chown -R {{user_id}}:{{user_id}} {{user_home}}/manifests-redhat-operator-index-*
+  when: registry_container.changed
+
+- name: Mirror redhat-operator-index
+  shell: |
+    cd {{user_home}}/manifests-redhat-operator-index-* && \
+    /usr/local/bin/oc image mirror \
+      -a {{user_home}}/pull-secret.json \
+      --filter-by-os='.*' \
+      -f mapping-custom.txt
+  when: registry_container.changed

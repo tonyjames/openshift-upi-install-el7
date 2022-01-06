@@ -1,0 +1,35 @@
+apiVersion: v1
+baseDomain: {{domain}}
+compute: 
+- hyperthreading: Enabled 
+  name: worker
+  replicas: 0 
+controlPlane: 
+  hyperthreading: Enabled 
+  name: master
+  replicas: 3 
+metadata:
+  name: {{ocp_cluster_name}}
+networking:
+  clusterNetwork:
+  - cidr: 10.128.0.0/14 
+    hostPrefix: 23 
+  networkType: OVNKubernetes
+  serviceNetwork: 
+  - 172.30.0.0/16
+platform:
+  none: {}
+fips: false
+pullSecret: '{"auths": {"{{ansible_eth0.ipv4.address}}:5000": {"auth": "{{registry_creds_encoded}}","email": "{{email_address}}"}}}'
+sshKey: '{{ssh_public_key}}'
+imageContentSources:
+- mirrors:
+  - {{ansible_eth0.ipv4.address}}:5000/openshift-release-dev
+  - {{ansible_eth0.ipv4.address}}:5000/openshift-release-dev/ocp-release
+  source: quay.io/openshift-release-dev/ocp-release
+- mirrors:
+  - {{ansible_eth0.ipv4.address}}:5000/openshift-release-dev
+  - {{ansible_eth0.ipv4.address}}:5000/openshift-release-dev/ocp-release
+  source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
+additionalTrustBundle: |
+{{ca_certificate.content | b64decode}}

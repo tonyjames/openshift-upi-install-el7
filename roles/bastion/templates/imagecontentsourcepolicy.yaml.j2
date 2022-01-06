@@ -1,0 +1,14 @@
+apiVersion: operator.openshift.io/v1alpha1
+kind: ImageContentSourcePolicy
+metadata:
+  name: poc
+spec:
+  repositoryDigestMirrors:
+  - mirrors:
+    - {{ansible_eth0.ipv4.address}}:5000/openshift-release-dev
+    - {{ansible_eth0.ipv4.address}}:5000/openshift-release-dev/ocp-release
+    source: quay.io/openshift-release-dev/ocp-release
+  - mirrors:
+    - {{ansible_eth0.ipv4.address}}:5000/openshift-release-dev
+    - {{ansible_eth0.ipv4.address}}:5000/openshift-release-dev/ocp-release
+    source: quay.io/openshift-release-dev/ocp-v4.0-art-dev

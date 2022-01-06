@@ -1,0 +1,13 @@
+---
+- hosts: localhost
+  connection: local
+  become: true
+  gather_facts: true
+  vars_files:
+  - vars.yaml
+  vars_prompt:
+  - name: ssh_public_key
+    prompt: SSH Public Key
+    private: no
+  roles:
+    - bastion
