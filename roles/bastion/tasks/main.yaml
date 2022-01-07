@@ -213,3 +213,23 @@
       --filter-by-os='.*' \
       -f mapping-custom.txt
   when: registry_container.changed
+
+- name: Copy all-imagestreams.txt to /tmp
+  copy:
+    src: files/all-imagestreams.txt
+    dest: /tmp/all-imagestreams.txt
+    owner: "{{user_id}}"
+    group: "{{user_id}}"
+    mode: 0644
+
+- name: Mirror imagestreams
+  shell: |
+    for IMAGESTREAM in $(cat all-imagestreams.txt); do
+      MIRRORED_IMAGESTREAM=$(echo ${IMAGESTREAM} |sed "s/registry.redhat.io/{{ansible_eth0.ipv4.address}}:5000/")
+
+      oc image mirror \
+        -a ${HOME}/pull-secret.json \
+        ${IMAGESTREAM} \
+        ${MIRRORED_IMAGESTREAM}
+    done
+  when: registry_container.changed
