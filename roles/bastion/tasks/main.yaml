@@ -88,7 +88,7 @@
 - name: Start container registry
   containers.podman.podman_container:
     name: registry
-    image: docker.io/registry:2
+    image: quay.io/tjames/registry:2
     state: started
     ports:
       - "5000:5000"
